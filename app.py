@@ -111,7 +111,7 @@ else:
 
 # ================= TABS =================
 tab_profile, tab_home, tab_admin, tab_fan, tab_chat = st.tabs(
-    ["👤 프로필", "🏠 홈", "📝 관리자 피드", "📝 팬 피드", "💬 채팅"]
+    ["👤 소개", "🏠 홈", "📝 관리자 피드", "📝 친구들 피드", "💬 채팅"]
 )
 
 # ================= PROFILE =================
@@ -194,7 +194,7 @@ with tab_admin:
 
 # ================= FAN FEED =================
 with tab_fan:
-    st.subheader("🫶 팬 피드")
+    st.subheader("🫶 친구들 피드")
 
     rows = c.execute("SELECT * FROM feed_fan ORDER BY id DESC").fetchall()
 
