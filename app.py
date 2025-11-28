@@ -111,7 +111,7 @@ else:
 
 # ================= TABS =================
 tab_profile, tab_home, tab_admin, tab_fan, tab_chat = st.tabs(
-    ["👤 프로필", "🏠 홈", "📝 관리자 피드", "📝 팬 피드", "💬 채팅"]
+    ["👤 프로필", "🏠 홈", "📝 피드", "💬 채팅"]
 )
 
 # ================= PROFILE =================
@@ -141,60 +141,10 @@ with tab_home:
 - 🔗 팬카페
     """)
 
-# ================= ADMIN FEED =================
-with tab_admin:
-    st.subheader("📌 관리자 피드")
-
-    rows = c.execute("SELECT * FROM feed_admin ORDER BY id DESC").fetchall()
-
-    for fid, content, img, likes, writer, tm in rows:
-        st.markdown(f"**{writer} · {tm}**")
-        st.write(content)
-        if img:
-            st.image(img, width=300)
-
-        col1, col2 = st.columns([1,4])
-        if col1.button(f"❤️ {likes}", key=f"admin_like_{fid}"):
-            c.execute("UPDATE feed_admin SET likes=likes+1 WHERE id=?", (fid,))
-            conn.commit()
-            st.rerun()
-
-        comments = c.execute(
-            "SELECT nickname, comment FROM comments WHERE feed_type='admin' AND feed_id=?",
-            (fid,)
-        ).fetchall()
-
-        for n, cm in comments:
-            st.write(f"💬 **{n}**: {cm}")
-
-        nick = st.text_input("닉네임", key=f"an_{fid}")
-        cm = st.text_input("댓글", key=f"ac_{fid}")
-        if st.button("댓글 등록", key=f"ab_{fid}"):
-            if nick and cm:
-                c.execute(
-                    "INSERT INTO comments VALUES (NULL,'admin',?,?,?,?)",
-                    (fid, nick, cm, datetime.now().strftime("%H:%M"))
-                )
-                conn.commit()
-                st.rerun()
-
-        st.divider()
-
-    if st.session_state.admin_logged_in:
-        st.markdown("### ➕ 게시글 추가")
-        text = st.text_area("내용")
-        img = st.text_input("이미지 URL (선택)")
-        if st.button("게시"):
-            c.execute(
-                "INSERT INTO feed_admin VALUES (NULL,?,?,0,'admin',?)",
-                (text, img, datetime.now().strftime("%Y-%m-%d %H:%M"))
-            )
-            conn.commit()
-            st.rerun()
 
 # ================= FAN FEED =================
 with tab_fan:
-    st.subheader("🫶 팬 피드")
+    st.subheader("🫶 피드")
 
     rows = c.execute("SELECT * FROM feed_fan ORDER BY id DESC").fetchall()
 
@@ -230,7 +180,7 @@ with tab_fan:
 
         st.divider()
 
-    st.markdown("### ✍ 팬 게시글 작성")
+    st.markdown("### ✍ 게시글 작성")
     writer = st.text_input("이름")
     text = st.text_area("내용")
     img = st.text_input("이미지 URL")
