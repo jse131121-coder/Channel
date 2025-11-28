@@ -142,20 +142,43 @@ with tab_home:
     """)
 
 # ================= ADMIN FEED =================
+# ================= ADMIN FEED =================
 with tab_admin:
     st.subheader("📌 관리자 피드")
 
-    rows = c.execute("SELECT * FROM feed_admin ORDER BY id DESC").fetchall()
+    # ✅ 관리자 글 작성 (반드시 위로!)
+    if st.session_state.admin_logged_in:
+        st.markdown("### ➕ 게시글 추가")
+        a_text = st.text_area("내용", key="admin_post_text")
+        a_img = st.text_input("이미지 URL (선택)", key="admin_post_img")
+
+        if st.button("게시", key="admin_post_btn"):
+            if a_text.strip():
+                c.execute(
+                    "INSERT INTO feed_admin (content, image_url, likes, writer, time) VALUES (?,?,?,?,?)",
+                    (a_text, a_img, 0, "admin", datetime.now().strftime("%Y-%m-%d %H:%M"))
+                )
+                conn.commit()
+                st.success("게시되었습니다 ✅")
+                st.rerun()
+
+    st.divider()
+
+    # ✅ 관리자 피드 출력
+    rows = c.execute(
+        "SELECT id, content, image_url, likes, writer, time FROM feed_admin ORDER BY id DESC"
+    ).fetchall()
 
     for fid, content, img, likes, writer, tm in rows:
         st.markdown(f"**{writer} · {tm}**")
         st.write(content)
+
         if img:
             st.image(img, width=300)
 
-        col1, col2 = st.columns([1,4])
+        col1, _ = st.columns([1,4])
         if col1.button(f"❤️ {likes}", key=f"admin_like_{fid}"):
-            c.execute("UPDATE feed_admin SET likes=likes+1 WHERE id=?", (fid,))
+            c.execute("UPDATE feed_admin SET likes = likes + 1 WHERE id = ?", (fid,))
             conn.commit()
             st.rerun()
 
@@ -179,18 +202,6 @@ with tab_admin:
                 st.rerun()
 
         st.divider()
-
-    if st.session_state.admin_logged_in:
-        st.markdown("### ➕ 게시글 추가")
-        text = st.text_area("내용")
-        img = st.text_input("이미지 URL (선택)")
-        if st.button("게시"):
-            c.execute(
-                "INSERT INTO feed_admin VALUES (NULL,?,?,0,'admin',?)",
-                (text, img, datetime.now().strftime("%Y-%m-%d %H:%M"))
-            )
-            conn.commit()
-            st.rerun()
 
 # ================= FAN FEED =================
 with tab_fan:
