@@ -1,172 +1,229 @@
 import streamlit as st
+import firebase_admin
+from firebase_admin import credentials, firestore, auth, storage
 from datetime import datetime
-import uuid
-import os
-import json
 from PIL import Image
+import uuid, io
 
 # ======================
-# 기본 설정
+# Firebase Init
+# ======================
+if not firebase_admin._apps:
+    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_admin.initialize_app(cred, {
+        "storageBucket": "<YOUR_PROJECT_ID>.appspot.com"
+    })
+
+db = firestore.client()
+bucket = storage.bucket()
+
+# ======================
+# Page / Dark UI
 # ======================
 st.set_page_config(page_title="AOUSE", layout="centered")
 
-DATA_FILE = "posts.json"
-IMG_DIR = "images"
-os.makedirs(IMG_DIR, exist_ok=True)
+st.markdown("""
+<style>
+html, body { background:#0f0f0f; color:white; }
+.block-container { max-width:420px; padding:1.2rem; }
+input, textarea { background:#1a1a1a !important; color:white !important; }
+button { border-radius:20px !important; }
+hr { border:0; border-top:1px solid #222; }
+.small { color:#888; font-size:12px; }
+.reply { margin-left:20px; color:#aaa; font-size:14px; }
+</style>
+""", unsafe_allow_html=True)
 
 # ======================
-# 데이터 저장 / 불러오기
+# Session
 # ======================
-def load_posts():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            # likes는 set으로 복구
-            for p in data:
-                p["likes"] = set(p["likes"])
-            return data
-    return []
-
-def save_posts(posts):
-    data = []
-    for p in posts:
-        cp = p.copy()
-        cp["likes"] = list(cp["likes"])
-        data.append(cp)
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+if "uid" not in st.session_state:
+    st.session_state.uid = None
+if "profile" not in st.session_state:
+    st.session_state.profile = None
 
 # ======================
-# 세션 상태
+# Badge auto update
 # ======================
-if "user" not in st.session_state:
-    st.session_state.user = None
+def update_badge(uid):
+    posts = list(db.collection("posts").where("user_id","==",uid).stream())
+    c = len(posts)
 
-if "posts" not in st.session_state:
-    st.session_state.posts = load_posts()
+    badge = "FRIEND"
+    if c >= 5: badge = "ACTIVE"
+    if c >= 15: badge = "CREATOR"
+    if c >= 30: badge = "ICON"
+
+    db.collection("users").document(uid).update({"badge": badge})
+    st.session_state.profile["badge"] = badge
 
 # ======================
-# 로그인
+# Login
 # ======================
 def login():
     st.title("AOUSE")
-    st.caption("friends only space")
-
-    username = st.text_input("username")
+    st.caption("private space for friends")
     if st.button("enter"):
-        if username.strip():
-            st.session_state.user = username.strip()
-            st.experimental_rerun()
-
-# ======================
-# 타임라인
-# ======================
-def timeline():
-    st.markdown(f"**@{st.session_state.user}**")
-    if st.button("logout"):
-        st.session_state.user = None
+        user = auth.create_user(uid=str(uuid.uuid4()))
+        st.session_state.uid = user.uid
         st.experimental_rerun()
 
+# ======================
+# Profile setup / edit
+# ======================
+def profile_setup(edit=False):
+    st.subheader("Edit profile" if edit else "Set up profile")
+
+    nickname = st.text_input(
+        "Nickname",
+        value=st.session_state.profile["nickname"] if edit else ""
+    )
+    image = st.file_uploader("Profile image", type=["png","jpg"])
+
+    if st.button("Save"):
+        img_url = st.session_state.profile["profile_image"] if edit else None
+
+        if image:
+            img = Image.open(image)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            blob = bucket.blob(f"profile/{st.session_state.uid}.png")
+            blob.upload_from_string(buf.getvalue(), content_type="image/png")
+            blob.make_public()
+            img_url = blob.public_url
+
+        profile = {
+            "nickname": nickname,
+            "profile_image": img_url,
+            "badge": st.session_state.profile["badge"] if edit else "FRIEND"
+        }
+
+        db.collection("users").document(st.session_state.uid).set(profile)
+        st.session_state.profile = profile
+        st.experimental_rerun()
+
+# ======================
+# Timeline
+# ======================
+def timeline():
+    st.markdown(
+        f"**{st.session_state.profile['nickname']}** "
+        f"<span class='small'>🏷 {st.session_state.profile['badge']}</span>",
+        unsafe_allow_html=True
+    )
+
+    if st.button("Edit profile"):
+        profile_setup(edit=True)
+        st.stop()
+
     st.divider()
 
-    # 새 글 작성
-    with st.form("new_post"):
-        text = st.text_area("Write something...", height=80)
-        image = st.file_uploader("Photo", type=["png","jpg","jpeg"])
-        submitted = st.form_submit_button("Post")
+    # New post
+    with st.form("post"):
+        text = st.text_area("Write something")
+        image = st.file_uploader("Image", type=["png","jpg"])
+        send = st.form_submit_button("Post")
 
-        if submitted and (text or image):
-            filename = None
+        if send:
+            img_url = None
             if image:
-                filename = f"{uuid.uuid4()}.png"
-                Image.open(image).save(f"{IMG_DIR}/{filename}")
+                img = Image.open(image)
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                blob = bucket.blob(f"posts/{uuid.uuid4()}.png")
+                blob.upload_from_string(buf.getvalue(), content_type="image/png")
+                blob.make_public()
+                img_url = blob.public_url
 
-            post = {
-                "id": str(uuid.uuid4()),
-                "user": st.session_state.user,
+            db.collection("posts").add({
+                "user_id": st.session_state.uid,
+                "nickname": st.session_state.profile["nickname"],
+                "badge": st.session_state.profile["badge"],
                 "text": text,
-                "image": filename,
-                "time": datetime.now().strftime("%Y.%m.%d %H:%M"),
-                "likes": set(),
+                "image": img_url,
+                "time": datetime.now(),
+                "likes": [],
                 "comments": []
-            }
-            st.session_state.posts.insert(0, post)
-            save_posts(st.session_state.posts)
+            })
+
+            update_badge(st.session_state.uid)
             st.experimental_rerun()
 
     st.divider()
 
-    # 포스트 출력
-    for post in st.session_state.posts:
-        st.markdown(f"**@{post['user']}**")
-        if post["text"]:
-            st.write(post["text"])
-        if post["image"]:
-            st.image(f"{IMG_DIR}/{post['image']}", use_column_width=True)
+    # Posts
+    posts = db.collection("posts").order_by("time", direction=firestore.Query.DESCENDING).stream()
 
-        # 좋아요
-        if st.button(
-            f"❤️ {len(post['likes'])}",
-            key=f"like_{post['id']}"
-        ):
-            if st.session_state.user in post["likes"]:
-                post["likes"].remove(st.session_state.user)
+    for p in posts:
+        d = p.to_dict()
+
+        st.markdown(
+            f"**{d['nickname']}** <span class='small'>🏷 {d['badge']}</span>",
+            unsafe_allow_html=True
+        )
+        if d["text"]:
+            st.write(d["text"])
+        if d["image"]:
+            st.image(d["image"], use_column_width=True)
+
+        # Like
+        likes = d["likes"]
+        if st.button(f"❤️ {len(likes)}", key=p.id):
+            if st.session_state.uid in likes:
+                likes.remove(st.session_state.uid)
             else:
-                post["likes"].add(st.session_state.user)
-            save_posts(st.session_state.posts)
+                likes.append(st.session_state.uid)
+            db.collection("posts").document(p.id).update({"likes": likes})
             st.experimental_rerun()
 
-        st.caption(post["time"])
+        # Comments + replies
+        for c in d["comments"]:
+            st.markdown(f"**{c['nickname']}** {c['text']}")
 
-        # 댓글
-        st.markdown("**Comments**")
-        for c in post["comments"]:
-            st.markdown(f"- **@{c['user']}** {c['text']}  \n_{c['time']}_")
-
-            # 답글
             for r in c["replies"]:
                 st.markdown(
-                    f"　↳ **@{r['user']}** {r['text']}  \n　_{r['time']}_"
+                    f"<div class='reply'>↳ {r['nickname']} {r['text']}</div>",
+                    unsafe_allow_html=True
                 )
 
-            reply_text = st.text_input(
-                "reply",
-                key=f"reply_{c['id']}"
-            )
-            if st.button("reply", key=f"btn_reply_{c['id']}"):
-                if reply_text.strip():
-                    c["replies"].append({
-                        "user": st.session_state.user,
-                        "text": reply_text,
-                        "time": datetime.now().strftime("%H:%M")
-                    })
-                    save_posts(st.session_state.posts)
-                    st.experimental_rerun()
-
-        # 댓글 작성
-        comment_text = st.text_input(
-            "Add a comment",
-            key=f"comment_{post['id']}"
-        )
-        if st.button("comment", key=f"btn_comment_{post['id']}"):
-            if comment_text.strip():
-                post["comments"].append({
-                    "id": str(uuid.uuid4()),
-                    "user": st.session_state.user,
-                    "text": comment_text,
-                    "time": datetime.now().strftime("%H:%M"),
-                    "replies": []
+            reply = st.text_input("reply", key=f"r_{p.id}_{c['id']}")
+            if st.button("↳", key=f"rb_{p.id}_{c['id']}"):
+                c["replies"].append({
+                    "nickname": st.session_state.profile["nickname"],
+                    "text": reply
                 })
-                save_posts(st.session_state.posts)
+                db.collection("posts").document(p.id).update({"comments": d["comments"]})
                 st.experimental_rerun()
+
+        # New comment
+        comment = st.text_input("comment", key=f"c_{p.id}")
+        if st.button("send", key=f"s_{p.id}"):
+            d["comments"].append({
+                "id": str(uuid.uuid4()),
+                "nickname": st.session_state.profile["nickname"],
+                "text": comment,
+                "replies": []
+            })
+            db.collection("posts").document(p.id).update({"comments": d["comments"]})
+            st.experimental_rerun()
 
         st.divider()
 
 # ======================
-# 실행
+# Run
 # ======================
-if st.session_state.user is None:
+if st.session_state.uid is None:
     login()
 else:
-    timeline()
+    if st.session_state.profile is None:
+        doc = db.collection("users").document(st.session_state.uid).get()
+        if doc.exists:
+            st.session_state.profile = doc.to_dict()
+            timeline()
+        else:
+            profile_setup()
+    else:
+        timeline()
+
+
 
