@@ -1,163 +1,172 @@
-from flask import Flask, request, redirect, url_for, render_template_string
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import (
-    LoginManager, UserMixin,
-    login_user, login_required,
-    logout_user, current_user
-)
-from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
+import streamlit as st
 from datetime import datetime
+import uuid
 import os
+import json
+from PIL import Image
 
-# =====================
+# ======================
 # 기본 설정
-# =====================
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'friends-only-secret'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///aouse.db'
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
+# ======================
+st.set_page_config(page_title="AOUSE", layout="centered")
 
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+DATA_FILE = "posts.json"
+IMG_DIR = "images"
+os.makedirs(IMG_DIR, exist_ok=True)
 
-db = SQLAlchemy(app)
-login_manager = LoginManager(app)
-login_manager.login_view = 'login'
+# ======================
+# 데이터 저장 / 불러오기
+# ======================
+def load_posts():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            # likes는 set으로 복구
+            for p in data:
+                p["likes"] = set(p["likes"])
+            return data
+    return []
 
-# =====================
-# DB 모델
-# =====================
-class User(UserMixin, db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
+def save_posts(posts):
+    data = []
+    for p in posts:
+        cp = p.copy()
+        cp["likes"] = list(cp["likes"])
+        data.append(cp)
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-class Post(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    content = db.Column(db.Text)
-    image = db.Column(db.String(200))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+# ======================
+# 세션 상태
+# ======================
+if "user" not in st.session_state:
+    st.session_state.user = None
 
-@login_manager.user_loader
-def load_user(user_id):
-    return User.query.get(int(user_id))
+if "posts" not in st.session_state:
+    st.session_state.posts = load_posts()
 
-# =====================
-# HTML 템플릿 (inline)
-# =====================
-BASE = """
-<!doctype html>
-<title>AOUSE friends</title>
-<style>
-body{font-family:sans-serif;max-width:500px;margin:auto}
-.post{border-bottom:1px solid #ddd;padding:10px 0}
-img{max-width:100%;border-radius:8px}
-a{margin-right:10px}
-</style>
-{% if current_user.is_authenticated %}
-<p>
-  {{ current_user.username }} |
-  <a href="/post">New</a>
-  <a href="/logout">Logout</a>
-</p>
-{% else %}
-<p>
-  <a href="/login">Login</a>
-  <a href="/register">Register</a>
-</p>
-{% endif %}
-<hr>
-{% block content %}{% endblock %}
-"""
-
-# =====================
-# 라우트
-# =====================
-@app.route('/')
-def index():
-    posts = Post.query.order_by(Post.created_at.desc()).all()
-    return render_template_string(
-        "{% extends base %}{% block content %}" +
-        "".join([
-            "<div class='post'><b>User {{p.user_id}}</b><p>{{p.content}}</p>" +
-            ("<img src='/static/uploads/{{p.image}}'>" if p.image else "") +
-            "<small>{{p.created_at}}</small></div>"
-            for p in posts
-        ]) +
-        "{% endblock %}",
-        posts=posts, base=BASE
-    )
-
-@app.route('/register', methods=['GET','POST'])
-def register():
-    if request.method == 'POST':
-        user = User(
-            username=request.form['username'],
-            password=generate_password_hash(request.form['password'])
-        )
-        db.session.add(user)
-        db.session.commit()
-        return redirect(url_for('login'))
-    return render_template_string("""
-    <form method="post">
-      <input name="username" placeholder="username"><br>
-      <input name="password" type="password" placeholder="password"><br>
-      <button>Register</button>
-    </form>
-    """)
-
-@app.route('/login', methods=['GET','POST'])
+# ======================
+# 로그인
+# ======================
 def login():
-    if request.method == 'POST':
-        user = User.query.filter_by(username=request.form['username']).first()
-        if user and check_password_hash(user.password, request.form['password']):
-            login_user(user)
-            return redirect(url_for('index'))
-    return render_template_string("""
-    <form method="post">
-      <input name="username"><br>
-      <input name="password" type="password"><br>
-      <button>Login</button>
-    </form>
-    """)
+    st.title("AOUSE")
+    st.caption("friends only space")
 
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    return redirect(url_for('index'))
+    username = st.text_input("username")
+    if st.button("enter"):
+        if username.strip():
+            st.session_state.user = username.strip()
+            st.experimental_rerun()
 
-@app.route('/post', methods=['GET','POST'])
-@login_required
-def post():
-    if request.method == 'POST':
-        image = request.files.get('image')
-        filename = None
-        if image:
-            filename = secure_filename(image.filename)
-            image.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        post = Post(
-            content=request.form['content'],
-            image=filename,
-            user_id=current_user.id
+# ======================
+# 타임라인
+# ======================
+def timeline():
+    st.markdown(f"**@{st.session_state.user}**")
+    if st.button("logout"):
+        st.session_state.user = None
+        st.experimental_rerun()
+
+    st.divider()
+
+    # 새 글 작성
+    with st.form("new_post"):
+        text = st.text_area("Write something...", height=80)
+        image = st.file_uploader("Photo", type=["png","jpg","jpeg"])
+        submitted = st.form_submit_button("Post")
+
+        if submitted and (text or image):
+            filename = None
+            if image:
+                filename = f"{uuid.uuid4()}.png"
+                Image.open(image).save(f"{IMG_DIR}/{filename}")
+
+            post = {
+                "id": str(uuid.uuid4()),
+                "user": st.session_state.user,
+                "text": text,
+                "image": filename,
+                "time": datetime.now().strftime("%Y.%m.%d %H:%M"),
+                "likes": set(),
+                "comments": []
+            }
+            st.session_state.posts.insert(0, post)
+            save_posts(st.session_state.posts)
+            st.experimental_rerun()
+
+    st.divider()
+
+    # 포스트 출력
+    for post in st.session_state.posts:
+        st.markdown(f"**@{post['user']}**")
+        if post["text"]:
+            st.write(post["text"])
+        if post["image"]:
+            st.image(f"{IMG_DIR}/{post['image']}", use_column_width=True)
+
+        # 좋아요
+        if st.button(
+            f"❤️ {len(post['likes'])}",
+            key=f"like_{post['id']}"
+        ):
+            if st.session_state.user in post["likes"]:
+                post["likes"].remove(st.session_state.user)
+            else:
+                post["likes"].add(st.session_state.user)
+            save_posts(st.session_state.posts)
+            st.experimental_rerun()
+
+        st.caption(post["time"])
+
+        # 댓글
+        st.markdown("**Comments**")
+        for c in post["comments"]:
+            st.markdown(f"- **@{c['user']}** {c['text']}  \n_{c['time']}_")
+
+            # 답글
+            for r in c["replies"]:
+                st.markdown(
+                    f"　↳ **@{r['user']}** {r['text']}  \n　_{r['time']}_"
+                )
+
+            reply_text = st.text_input(
+                "reply",
+                key=f"reply_{c['id']}"
+            )
+            if st.button("reply", key=f"btn_reply_{c['id']}"):
+                if reply_text.strip():
+                    c["replies"].append({
+                        "user": st.session_state.user,
+                        "text": reply_text,
+                        "time": datetime.now().strftime("%H:%M")
+                    })
+                    save_posts(st.session_state.posts)
+                    st.experimental_rerun()
+
+        # 댓글 작성
+        comment_text = st.text_input(
+            "Add a comment",
+            key=f"comment_{post['id']}"
         )
-        db.session.add(post)
-        db.session.commit()
-        return redirect(url_for('index'))
+        if st.button("comment", key=f"btn_comment_{post['id']}"):
+            if comment_text.strip():
+                post["comments"].append({
+                    "id": str(uuid.uuid4()),
+                    "user": st.session_state.user,
+                    "text": comment_text,
+                    "time": datetime.now().strftime("%H:%M"),
+                    "replies": []
+                })
+                save_posts(st.session_state.posts)
+                st.experimental_rerun()
 
-    return render_template_string("""
-    <form method="post" enctype="multipart/form-data">
-      <textarea name="content" placeholder="Write something..."></textarea><br>
-      <input type="file" name="image"><br>
-      <button>Post</button>
-    </form>
-    """)
+        st.divider()
 
-# =====================
+# ======================
 # 실행
-# =====================
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    app.run(debug=True)
+# ======================
+if st.session_state.user is None:
+    login()
+else:
+    timeline()
+
