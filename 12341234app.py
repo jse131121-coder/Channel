@@ -107,9 +107,24 @@ st.markdown("<h2 style='text-align:center'>💬 Privcht</h2>", unsafe_allow_html
 if st.session_state.admin:
     with st.sidebar:
         st.markdown(f"### 🎤 {st.session_state.admin[2]}")
+
+        # 🔄 관리자 프로필 사진 변경
+        new_profile = st.file_uploader("프로필 사진 변경", type=["png","jpg","jpeg"])
+        if new_profile:
+            path = save_file(new_profile)
+            c.execute("UPDATE admins SET profile=? WHERE id=?", (path, st.session_state.admin[0]))
+            conn.commit()
+            st.session_state.admin = (
+                st.session_state.admin[0],
+                st.session_state.admin[1],
+                st.session_state.admin[2],
+                path
+            )
+            st.success("프로필 사진 변경 완료")
+
         if st.button("Logout"):
             st.session_state.admin = None
-            st.rerun()
+            st.experimental_rerun()
 else:
     with st.expander("🔐 Admin Login"):
         aid = st.text_input("ID")
@@ -122,7 +137,7 @@ else:
             ).fetchone()
             if admin:
                 st.session_state.admin = admin
-                st.rerun()
+                st.experimental_rerun()
             else:
                 st.error("로그인 실패")
 
@@ -196,13 +211,13 @@ for m in msgs:
                     )
                 )
                 conn.commit()
-                st.rerun()
+                st.experimental_rerun()
 
             if st.button("❌ 질문 삭제", key=f"d{m[0]}"):
                 c.execute("DELETE FROM messages WHERE id=?", (m[0],))
                 c.execute("DELETE FROM replies WHERE message_id=?", (m[0],))
                 conn.commit()
-                st.rerun()
+                st.experimental_rerun()
 
 # ================== INPUT ==================
 st.markdown("---")
@@ -218,9 +233,8 @@ with st.form("send"):
                  datetime.now().strftime("%Y-%m-%d %H:%M"))
             )
             conn.commit()
-            st.rerun()
+            st.experimental_rerun()
 
-     
 
 
 
