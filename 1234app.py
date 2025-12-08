@@ -53,7 +53,6 @@ if "login_open" not in st.session_state:
 
 # ================= TOP LOGIN =================
 top = st.columns([8, 2])
-
 with top[1]:
     if st.session_state.admin is None:
         if st.button("Login"):
@@ -68,44 +67,38 @@ with top[1]:
 # ================= LOGIN / ADMIN CREATE =================
 if st.session_state.login_open:
     st.markdown("### 🔐 관리자 로그인 / 생성")
-    tab_login, tab_create = st.tabs(["로그인", "관리자 생성"])
+    tab1, tab2 = st.tabs(["로그인", "관리자 생성"])
 
-    with tab_login:
-        login_id = st.text_input("ID", key="login_id")
-        login_pw = st.text_input("PW", type="password", key="login_pw")
-
+    with tab1:
+        i = st.text_input("ID")
+        p = st.text_input("PW", type="password")
         if st.button("로그인 완료"):
-            c.execute(
-                "SELECT * FROM admins WHERE id=? AND pw=?",
-                (login_id, login_pw)
-            )
+            c.execute("SELECT * FROM admins WHERE id=? AND pw=?", (i, p))
             admin = c.fetchone()
-
             if admin:
                 st.session_state.admin = admin
                 st.session_state.login_open = False
                 st.rerun()
             else:
-                st.error("아이디 또는 비밀번호가 틀렸어요")
+                st.error("아이디 또는 비밀번호 오류")
 
-    with tab_create:
-        new_id = st.text_input("새 관리자 ID")
-        new_pw = st.text_input("새 관리자 PW", type="password")
-        new_name = st.text_input("아티스트 이름")
-
+    with tab2:
+        ni = st.text_input("새 관리자 ID")
+        np = st.text_input("새 관리자 PW", type="password")
+        nn = st.text_input("아티스트 이름")
         if st.button("관리자 생성"):
-            if new_id and new_pw and new_name:
+            if ni and np and nn:
                 try:
                     c.execute(
                         "INSERT INTO admins VALUES (?,?,?,?)",
-                        (new_id, new_pw, new_name, "")
+                        (ni, np, nn, "")
                     )
                     conn.commit()
-                    st.success("✅ 관리자 계정 생성 완료")
+                    st.success("관리자 생성 완료 ✅")
                 except sqlite3.IntegrityError:
-                    st.error("이미 존재하는 ID입니다")
+                    st.error("이미 존재하는 ID")
             else:
-                st.warning("모든 칸을 입력해주세요")
+                st.warning("모든 항목을 입력해주세요")
 
 # ================= WRITE =================
 st.markdown("---")
@@ -146,14 +139,24 @@ for p in posts:
 
     st.write(p[2])
 
-    # ----- admin pin -----
+    # ===== 관리자 버튼 =====
     if st.session_state.admin:
-        if st.button("📌 고정", key=f"pin_{p[0]}"):
-            c.execute("UPDATE posts SET pinned=1 WHERE id=?", (p[0],))
-            conn.commit()
-            st.rerun()
+        col1, col2 = st.columns(2)
 
-    # ----- comments -----
+        with col1:
+            if st.button("📌 고정", key=f"pin_{p[0]}"):
+                c.execute("UPDATE posts SET pinned=1 WHERE id=?", (p[0],))
+                conn.commit()
+                st.rerun()
+
+        with col2:
+            if st.button("🗑️ 삭제", key=f"del_{p[0]}"):
+                c.execute("DELETE FROM posts WHERE id=?", (p[0],))
+                c.execute("DELETE FROM comments WHERE post_id=?", (p[0],))
+                conn.commit()
+                st.rerun()
+
+    # ===== 댓글 =====
     comments = c.execute(
         "SELECT * FROM comments WHERE post_id=? AND parent_id IS NULL",
         (p[0],)
@@ -162,13 +165,10 @@ for p in posts:
     for cm in comments:
         st.write(f"💬 **{cm[2]}**: {cm[3]}")
 
-        # ----- admin reply -----
+        # 관리자 대댓글
         if st.session_state.admin:
-            reply = st.text_input(
-                "관리자 대댓글",
-                key=f"reply_{cm[0]}"
-            )
-            if st.button("답글 등록", key=f"reply_btn_{cm[0]}"):
+            reply = st.text_input("관리자 대댓글", key=f"r_{cm[0]}")
+            if st.button("답글", key=f"rb_{cm[0]}"):
                 if reply:
                     c.execute(
                         "INSERT INTO comments VALUES (NULL,?,?,?,?,?)",
@@ -177,11 +177,10 @@ for p in posts:
                     conn.commit()
                     st.rerun()
 
-    # ----- user comment -----
-    writer = st.text_input("닉네임", key=f"writer_{p[0]}")
-    text = st.text_input("댓글 내용", key=f"text_{p[0]}")
-
-    if st.button("댓글 작성", key=f"comment_btn_{p[0]}"):
+    # 일반 댓글
+    writer = st.text_input("닉네임", key=f"w_{p[0]}")
+    text = st.text_input("댓글 내용", key=f"c_{p[0]}")
+    if st.button("댓글 작성", key=f"cb_{p[0]}"):
         if writer and text:
             c.execute(
                 "INSERT INTO comments VALUES (NULL,?,?,?,?,NULL)",
@@ -189,8 +188,7 @@ for p in posts:
             )
             conn.commit()
             st.rerun()
-        else:
-            st.warning("닉네임과 댓글을 입력해주세요")
 
     st.markdown("---")
+
 
