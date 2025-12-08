@@ -4,6 +4,45 @@ from datetime import datetime
 
 st.set_page_config(page_title="Privcht", layout="centered")
 
+# ================== STYLE ==================
+st.markdown("""
+<style>
+body { background:#f7f7f7; }
+
+.bubble-right {
+    display: inline-block;
+    background: white;
+    padding: 12px 16px;
+    border-radius: 18px 18px 4px 18px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    max-width: 70%;
+    float: right;
+    clear: both;
+    margin: 8px 0;
+    word-wrap: break-word;
+}
+
+.bubble-left {
+    display: inline-block;
+    background: white;
+    padding: 12px 16px;
+    border-radius: 18px 18px 18px 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    max-width: 70%;
+    float: left;
+    clear: both;
+    margin: 8px 0;
+    word-wrap: break-word;
+}
+
+.time {
+    font-size: 11px;
+    color: #999;
+    margin-top: 4px;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ================== DB ==================
 conn = sqlite3.connect("privcht.db", check_same_thread=False)
 c = conn.cursor()
@@ -51,69 +90,55 @@ conn.commit()
 if "admin" not in st.session_state:
     st.session_state.admin = None
 
-# ================== LOGIN ==================
+# ================== HEADER ==================
 st.markdown("<h2 style='text-align:center'>💬 Privcht</h2>", unsafe_allow_html=True)
 
-login = st.button("Admin Login", use_container_width=True)
+# ================== LOGIN ==================
+with st.expander("🔐 Admin Login"):
+    aid = st.text_input("ID")
+    apw = st.text_input("PW", type="password")
+    if st.button("Login"):
+        a = c.execute(
+            "SELECT * FROM admins WHERE id=? AND pw=?",
+            (aid, apw)
+        ).fetchone()
+        if a:
+            st.session_state.admin = a
+            st.success("로그인 성공")
+            st.rerun()
+        else:
+            st.error("로그인 실패")
 
-if login:
-    st.session_state.login_open = True
-
-if st.session_state.get("login_open"):
-
-    with st.form("login_form"):
-        aid = st.text_input("ID")
-        apw = st.text_input("PW", type="password")
-        submitted = st.form_submit_button("Login")
-
-        if submitted:
-            a = c.execute(
-                "SELECT * FROM admins WHERE id=? AND pw=?",
-                (aid, apw)
-            ).fetchone()
-            if a:
-                st.session_state.admin = a
-                st.success("로그인 성공")
-                st.rerun()
-            else:
-                st.error("로그인 실패")
-
-    st.markdown("---")
-    st.subheader("➕ 관리자 생성")
-    with st.form("create_admin"):
-        nid = st.text_input("New ID")
-        npw = st.text_input("New PW", type="password")
-        name = st.text_input("Artist Name")
-        profile = st.text_input("Profile Image URL (선택)")
-        if st.form_submit_button("Create"):
-            try:
-                c.execute(
-                    "INSERT INTO admins VALUES (?,?,?,?)",
-                    (nid, npw, name, profile)
-                )
-                conn.commit()
-                st.success("관리자 생성 완료")
-            except:
-                st.error("이미 존재하는 ID")
+    st.markdown("### ➕ 관리자 생성")
+    nid = st.text_input("New ID")
+    npw = st.text_input("New PW", type="password")
+    name = st.text_input("Artist Name")
+    profile = st.text_input("Profile Image URL (선택)")
+    if st.button("Create Admin"):
+        try:
+            c.execute(
+                "INSERT INTO admins VALUES (?,?,?,?)",
+                (nid, npw, name, profile)
+            )
+            conn.commit()
+            st.success("관리자 생성 완료")
+        except:
+            st.error("이미 존재하는 ID")
 
 # ================== CHAT ==================
 st.markdown("---")
 
-msgs = c.execute(
-    "SELECT * FROM messages ORDER BY id DESC"
-).fetchall()
+msgs = c.execute("SELECT * FROM messages ORDER BY id").fetchall()
 
-for m in msgs[::-1]:
+for m in msgs:
     # USER MESSAGE
     st.markdown(f"""
-    <div style='background:#e6f2ff;padding:12px;border-radius:18px 18px 0 18px;
-     margin:10px 40px 5px 0;text-align:right'>
-     {m[1].replace("\n","<br>")}
-     <div style='font-size:11px;color:gray'>{m[3]}</div>
+    <div class="bubble-right">
+        {m[1].replace("\\n","<br>")}
+        <div class="time">{m[3]}</div>
     </div>
     """, unsafe_allow_html=True)
 
-    # IMAGE
     if m[2]:
         st.image(m[2], width=200)
 
@@ -149,21 +174,21 @@ for m in msgs[::-1]:
 
     for r in replies:
         admin = c.execute(
-            "SELECT name,profile FROM admins WHERE id=?",
+            "SELECT name FROM admins WHERE id=?",
             (r[2],)
         ).fetchone()
+
         st.markdown(f"""
-        <div style='background:#f1f1f1;padding:12px;border-radius:18px 18px 18px 0;
-         margin:5px 0 10px 40px'>
-         <b>🎤 {admin[0]}</b><br>
-         {r[3].replace("\n","<br>")}
-         <div style='font-size:11px;color:gray'>{r[4]}</div>
+        <div class="bubble-left">
+            <b>🎤 {admin[0]}</b><br>
+            {r[3].replace("\\n","<br>")}
+            <div class="time">{r[4]}</div>
         </div>
         """, unsafe_allow_html=True)
 
     # ADMIN TOOLS
     if st.session_state.admin:
-        with st.expander("↩ 답변"):
+        with st.expander("↩ 답변 / 관리"):
             reply = st.text_area("답변", key=f"r{m[0]}", height=100)
             if st.button("Send", key=f"s{m[0]}"):
                 c.execute(
@@ -175,12 +200,12 @@ for m in msgs[::-1]:
                 st.rerun()
 
             if st.button("❌ 질문 삭제", key=f"d{m[0]}"):
-                c.execute("DELETE FROM messages WHERE id=?",(m[0],))
-                c.execute("DELETE FROM replies WHERE message_id=?",(m[0],))
+                c.execute("DELETE FROM messages WHERE id=?", (m[0],))
+                c.execute("DELETE FROM replies WHERE message_id=?", (m[0],))
                 conn.commit()
                 st.rerun()
 
-# ================== INPUT BAR ==================
+# ================== INPUT ==================
 st.markdown("---")
 with st.form("send"):
     msg = st.text_area(
@@ -188,9 +213,7 @@ with st.form("send"):
         placeholder="질문을 입력하세요…",
         height=60
     )
-    img = st.text_input(
-        "이미지 URL (선택)"
-    )
+    img = st.text_input("이미지 URL (선택)")
     if st.form_submit_button("Send"):
         if msg.strip():
             c.execute(
