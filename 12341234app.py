@@ -24,29 +24,27 @@ st.markdown("""
 body { background:#f7f7f7; }
 
 .bubble-right {
-    display:inline-block;
     background:white;
     padding:12px 16px;
     border-radius:18px 18px 4px 18px;
     box-shadow:0 4px 12px rgba(0,0,0,0.08);
     max-width:70%;
-    float:right;
-    clear:both;
-    margin:8px 0;
-    word-break:break-word;
+    margin-left:auto;
+    margin-bottom:8px;
 }
 
 .bubble-left {
-    display:inline-block;
     background:white;
     padding:12px 16px;
     border-radius:18px 18px 18px 4px;
     box-shadow:0 4px 12px rgba(0,0,0,0.08);
     max-width:70%;
-    float:left;
-    clear:both;
-    margin:8px 0;
-    word-break:break-word;
+    margin-bottom:8px;
+}
+
+.time {
+    font-size:11px;
+    color:#999;
 }
 
 .admin-row {
@@ -59,11 +57,6 @@ body { background:#f7f7f7; }
     height:36px;
     border-radius:50%;
     object-fit:cover;
-}
-
-.time {
-    font-size:11px;
-    color:#999;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -83,6 +76,7 @@ c.execute("""CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content TEXT,
     image TEXT,
+    audio TEXT,
     time TEXT
 )""")
 
@@ -107,24 +101,9 @@ st.markdown("<h2 style='text-align:center'>💬 Privcht</h2>", unsafe_allow_html
 if st.session_state.admin:
     with st.sidebar:
         st.markdown(f"### 🎤 {st.session_state.admin[2]}")
-
-        # 🔄 관리자 프로필 사진 변경
-        new_profile = st.file_uploader("프로필 사진 변경", type=["png","jpg","jpeg"])
-        if new_profile:
-            path = save_file(new_profile)
-            c.execute("UPDATE admins SET profile=? WHERE id=?", (path, st.session_state.admin[0]))
-            conn.commit()
-            st.session_state.admin = (
-                st.session_state.admin[0],
-                st.session_state.admin[1],
-                st.session_state.admin[2],
-                path
-            )
-            st.success("프로필 사진 변경 완료")
-
         if st.button("Logout"):
             st.session_state.admin = None
-            st.experimental_rerun()
+            st.rerun()
 else:
     with st.expander("🔐 Admin Login"):
         aid = st.text_input("ID")
@@ -137,7 +116,7 @@ else:
             ).fetchone()
             if admin:
                 st.session_state.admin = admin
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("로그인 실패")
 
@@ -166,12 +145,14 @@ for m in msgs:
     st.markdown(f"""
     <div class="bubble-right">
         {m[1].replace("\\n","<br>")}
-        <div class="time">{m[3]}</div>
+        <div class="time">{m[4]}</div>
     </div>
     """, unsafe_allow_html=True)
 
     if m[2]:
-        st.image(m[2], width=220)
+        st.image(m[2], width=200)
+    if m[3]:
+        st.audio(m[3])
 
     replies = c.execute(
         "SELECT * FROM replies WHERE message_id=?",
@@ -198,42 +179,53 @@ for m in msgs:
         """, unsafe_allow_html=True)
 
     if st.session_state.admin:
-        with st.expander("↩ 답변 / 관리"):
-            reply = st.text_area("답변", key=f"r{m[0]}", height=100)
+        with st.expander("↩ 답변"):
+            reply = st.text_area("답변", key=f"r{m[0]}")
             if st.button("Send", key=f"s{m[0]}"):
                 c.execute(
                     "INSERT INTO replies VALUES (NULL,?,?,?,?)",
-                    (
-                        m[0],
-                        st.session_state.admin[0],
-                        reply,
-                        datetime.now().strftime("%Y-%m-%d %H:%M")
-                    )
+                    (m[0], st.session_state.admin[0], reply,
+                     datetime.now().strftime("%Y-%m-%d %H:%M"))
                 )
                 conn.commit()
-                st.experimental_rerun()
+                st.rerun()
 
-            if st.button("❌ 질문 삭제", key=f"d{m[0]}"):
-                c.execute("DELETE FROM messages WHERE id=?", (m[0],))
-                c.execute("DELETE FROM replies WHERE message_id=?", (m[0],))
-                conn.commit()
-                st.experimental_rerun()
-
-# ================== INPUT ==================
+# ================== INPUT BAR ==================
 st.markdown("---")
 with st.form("send"):
-    msg = st.text_area("질문", height=60)
-    img = st.file_uploader("이미지 업로드 (선택)", type=["png","jpg","jpeg"])
-    if st.form_submit_button("Send"):
-        if msg.strip():
-            img_path = save_file(img) if img else None
-            c.execute(
-                "INSERT INTO messages VALUES (NULL,?,?,?)",
-                (msg, img_path,
-                 datetime.now().strftime("%Y-%m-%d %H:%M"))
+    cols = st.columns([1,6,2])
+
+    with cols[0]:
+        plus = st.form_submit_button("➕")
+
+    with cols[1]:
+        msg = st.text_area("메시지", height=50, placeholder="메시지를 입력하세요…")
+
+    with cols[2]:
+        send = st.form_submit_button("Send")
+
+    if plus:
+        with st.expander("첨부"):
+            img = st.file_uploader("📷 이미지", type=["png","jpg","jpeg"])
+            audio = st.file_uploader("🎤 음성", type=["mp3","wav","m4a"])
+    else:
+        img = None
+        audio = None
+
+    if send and msg.strip():
+        img_path = save_file(img) if img else None
+        audio_path = save_file(audio) if audio else None
+        c.execute(
+            "INSERT INTO messages VALUES (NULL,?,?,?,?)",
+            (
+                msg,
+                img_path,
+                audio_path,
+                datetime.now().strftime("%Y-%m-%d %H:%M")
             )
-            conn.commit()
-            st.experimental_rerun()
+        )
+        conn.commit()
+        st.rerun()
 
 
 
